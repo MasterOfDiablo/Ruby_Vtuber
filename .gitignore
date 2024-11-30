@@ -1,20 +1,44 @@
-# Ignore virtual environment
-venv/
-
-# Ignore environment variables
-.env/
-
-# Ignore Logs
-logs/
-
-# Ignore compiled files
+# Python
 __pycache__/
-*.pyc
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
 
-# Ignore test coverage and reports
+# Virtual Environment
+venv/
+ENV/
+
+# pytest
+.pytest_cache/
 .coverage
 htmlcov/
-*.pytest_cache/
 
-# Ignore Context for the development AI
-CONTEXT.md
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# Environment variables
+.env
+
+# Logs
+logs/
+*.log
