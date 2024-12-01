@@ -14,7 +14,7 @@ class GameQueries:
         self.logger = logging.getLogger(__name__)
 
     def create_session(self, game_name: str, game_mode: str = None, 
-                      difficulty: str = None) -> Optional[UUID]:
+                      difficulty: str = None) -> Optional[str]:
         """
         Create a new game session.
         
@@ -24,22 +24,31 @@ class GameQueries:
             difficulty: Game difficulty setting
             
         Returns:
-            UUID of created session or None if creation failed
+            UUID string of created session or None if creation failed
         """
         try:
+            # Generate UUID for session
+            session_id = str(UUID(int=0))  # Placeholder for auto-generated UUID
+            
             query = """
                 INSERT INTO game_sessions 
-                (game_name, game_mode, difficulty, status)
-                VALUES (%s, %s, %s, 'active')
-                RETURNING session_id
+                (session_id, game_name, game_mode, difficulty, status)
+                VALUES (UUID(), %s, %s, %s, 'active')
             """
-            result = self.db.execute_query(query, (game_name, game_mode, difficulty))
+            self.db.execute_query(query, (game_name, game_mode, difficulty), fetch=False)
+            
+            # Get the UUID of the inserted row
+            result = self.db.execute_query(
+                "SELECT session_id FROM game_sessions WHERE game_name = %s ORDER BY start_time DESC LIMIT 1",
+                (game_name,)
+            )
             return result[0]['session_id'] if result else None
+            
         except Exception as e:
             self.logger.error(f"Failed to create game session: {e}")
             raise
 
-    def end_session(self, session_id: UUID, summary: Dict[str, Any]) -> None:
+    def end_session(self, session_id: str, summary: Dict[str, Any]) -> None:
         """
         End a game session and update its summary.
         
@@ -60,7 +69,7 @@ class GameQueries:
             self.logger.error(f"Failed to end game session: {e}")
             raise
 
-    def log_event(self, session_id: UUID, event_type: str, category: str,
+    def log_event(self, session_id: str, event_type: str, category: str,
                  data: Dict[str, Any], impact_score: float = 0.0) -> None:
         """
         Log a game event.
@@ -75,8 +84,8 @@ class GameQueries:
         try:
             query = """
                 INSERT INTO game_events 
-                (session_id, event_type, event_category, event_data, impact_score)
-                VALUES (%s, %s, %s, %s, %s)
+                (event_id, session_id, event_type, event_category, event_data, impact_score)
+                VALUES (UUID(), %s, %s, %s, %s, %s)
             """
             self.db.execute_query(query, (session_id, event_type, category,
                                         json.dumps(data), impact_score), fetch=False)
@@ -84,7 +93,7 @@ class GameQueries:
             self.logger.error(f"Failed to log game event: {e}")
             raise
 
-    def get_session_events(self, session_id: UUID, 
+    def get_session_events(self, session_id: str, 
                           category: str = None) -> List[Dict[str, Any]]:
         """
         Get events for a specific game session.
@@ -115,7 +124,7 @@ class GameQueries:
             self.logger.error(f"Failed to get session events: {e}")
             raise
 
-    def get_session_summary(self, session_id: UUID) -> Optional[Dict[str, Any]]:
+    def get_session_summary(self, session_id: str) -> Optional[Dict[str, Any]]:
         """
         Get complete summary of a game session.
         
@@ -127,20 +136,16 @@ class GameQueries:
         """
         try:
             query = """
-                SELECT 
-                    gs.*,
-                    COALESCE(
-                        json_arrayagg(
-                            json_object(
-                                'event_type', ge.event_type,
-                                'category', ge.event_category,
-                                'data', ge.event_data,
-                                'timestamp', ge.timestamp,
-                                'impact_score', ge.impact_score
-                            )
-                        ),
-                        '[]'
-                    ) as events
+                SELECT gs.*, 
+                       GROUP_CONCAT(
+                           JSON_OBJECT(
+                               'event_type', ge.event_type,
+                               'category', ge.event_category,
+                               'data', ge.event_data,
+                               'timestamp', ge.timestamp,
+                               'impact_score', ge.impact_score
+                           )
+                       ) as events
                 FROM game_sessions gs
                 LEFT JOIN game_events ge ON gs.session_id = ge.session_id
                 WHERE gs.session_id = %s
