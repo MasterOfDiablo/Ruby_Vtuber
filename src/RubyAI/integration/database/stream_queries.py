@@ -2,7 +2,7 @@ import json
 import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from .db_manager import DatabaseManager
 
@@ -27,14 +27,23 @@ class StreamQueries:
             UUID of created session or None if creation failed
         """
         try:
+            # Generate new session ID
+            session_id = uuid4()
+            
+            # Convert UUIDs to strings for MySQL
+            game_session_str = str(game_session_id) if game_session_id else None
+            
+            # Insert the session with generated ID
             query = """
                 INSERT INTO stream_sessions 
-                (title, category, game_session_id, status)
-                VALUES (%s, %s, %s, 'active')
-                RETURNING session_id
+                (session_id, title, category, game_session_id, status, start_time)
+                VALUES (%s, %s, %s, %s, 'active', CURRENT_TIMESTAMP)
             """
-            result = self.db.execute_query(query, (title, category, game_session_id))
-            return result[0]['session_id'] if result else None
+            self.db.execute_query(query, (str(session_id), title, category, 
+                                        game_session_str), fetch=False)
+            
+            return session_id
+            
         except Exception as e:
             self.logger.error(f"Failed to create stream session: {e}")
             raise
@@ -55,7 +64,7 @@ class StreamQueries:
                     session_metrics = %s
                 WHERE session_id = %s
             """
-            self.db.execute_query(query, (json.dumps(metrics), session_id), fetch=False)
+            self.db.execute_query(query, (json.dumps(metrics), str(session_id)), fetch=False)
         except Exception as e:
             self.logger.error(f"Failed to end stream session: {e}")
             raise
@@ -77,14 +86,16 @@ class StreamQueries:
             context_tags: Contextual information about the interaction
         """
         try:
+            interaction_id = uuid4()
             query = """
                 INSERT INTO viewer_interactions 
-                (session_id, viewer_id, interaction_type, message,
-                 sentiment_score, impact_level, context_tags)
-                VALUES (%s, %s, %s, %s, %s, %s, %s)
+                (interaction_id, session_id, viewer_id, interaction_type, message,
+                 sentiment_score, impact_level, context_tags, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             """
-            self.db.execute_query(query, (session_id, viewer_id, interaction_type,
-                                        message, sentiment_score, impact_level,
+            self.db.execute_query(query, (str(interaction_id), str(session_id), 
+                                        str(viewer_id), interaction_type, message,
+                                        sentiment_score, impact_level,
                                         json.dumps(context_tags)), fetch=False)
         except Exception as e:
             self.logger.error(f"Failed to log viewer interaction: {e}")
@@ -104,14 +115,16 @@ class StreamQueries:
             significance: Importance score (0.0 to 1.0)
         """
         try:
+            highlight_id = uuid4()
             query = """
                 INSERT INTO stream_highlights 
-                (session_id, highlight_type, description,
-                 viewer_impact, significance_score)
-                VALUES (%s, %s, %s, %s, %s)
+                (highlight_id, session_id, highlight_type, description,
+                 viewer_impact, significance_score, timestamp)
+                VALUES (%s, %s, %s, %s, %s, %s, CURRENT_TIMESTAMP)
             """
-            self.db.execute_query(query, (session_id, highlight_type, description,
-                                        json.dumps(viewer_impact), significance),
+            self.db.execute_query(query, (str(highlight_id), str(session_id), 
+                                        highlight_type, description,
+                                        json.dumps(viewer_impact), significance), 
                                 fetch=False)
         except Exception as e:
             self.logger.error(f"Failed to log stream highlight: {e}")
@@ -136,14 +149,23 @@ class StreamQueries:
                     WHERE session_id = %s AND interaction_type = %s
                     ORDER BY timestamp DESC
                 """
-                return self.db.execute_query(query, (session_id, interaction_type)) or []
+                interactions = self.db.execute_query(query, (str(session_id), interaction_type)) or []
             else:
                 query = """
                     SELECT * FROM viewer_interactions
                     WHERE session_id = %s
                     ORDER BY timestamp DESC
                 """
-                return self.db.execute_query(query, (session_id,)) or []
+                interactions = self.db.execute_query(query, (str(session_id),)) or []
+                
+            # Convert UUID strings to UUID objects
+            for interaction in interactions:
+                interaction['interaction_id'] = UUID(interaction['interaction_id'])
+                interaction['session_id'] = UUID(interaction['session_id'])
+                interaction['viewer_id'] = UUID(interaction['viewer_id'])
+                
+            return interactions
+            
         except Exception as e:
             self.logger.error(f"Failed to get session interactions: {e}")
             raise
@@ -164,7 +186,15 @@ class StreamQueries:
                 WHERE session_id = %s
                 ORDER BY significance_score DESC, timestamp DESC
             """
-            return self.db.execute_query(query, (session_id,)) or []
+            highlights = self.db.execute_query(query, (str(session_id),)) or []
+            
+            # Convert UUID strings to UUID objects
+            for highlight in highlights:
+                highlight['highlight_id'] = UUID(highlight['highlight_id'])
+                highlight['session_id'] = UUID(highlight['session_id'])
+                
+            return highlights
+            
         except Exception as e:
             self.logger.error(f"Failed to get session highlights: {e}")
             raise
@@ -190,7 +220,16 @@ class StreamQueries:
                 WHERE vi.viewer_id = %s
                 ORDER BY vi.timestamp DESC
             """
-            return self.db.execute_query(query, (viewer_id,)) or []
+            interactions = self.db.execute_query(query, (str(viewer_id),)) or []
+            
+            # Convert UUID strings to UUID objects
+            for interaction in interactions:
+                interaction['interaction_id'] = UUID(interaction['interaction_id'])
+                interaction['session_id'] = UUID(interaction['session_id'])
+                interaction['viewer_id'] = UUID(interaction['viewer_id'])
+                
+            return interactions
+            
         except Exception as e:
             self.logger.error(f"Failed to get viewer history: {e}")
             raise
@@ -208,7 +247,16 @@ class StreamQueries:
                 WHERE status = 'active'
                 ORDER BY start_time DESC
             """
-            return self.db.execute_query(query) or []
+            sessions = self.db.execute_query(query) or []
+            
+            # Convert UUID strings to UUID objects
+            for session in sessions:
+                session['session_id'] = UUID(session['session_id'])
+                if session['game_session_id']:
+                    session['game_session_id'] = UUID(session['game_session_id'])
+                    
+            return sessions
+            
         except Exception as e:
             self.logger.error(f"Failed to get active sessions: {e}")
             raise
@@ -238,8 +286,16 @@ class StreamQueries:
                 WHERE ss.session_id = %s
                 GROUP BY ss.session_id
             """
-            result = self.db.execute_query(query, (session_id,))
-            return result[0] if result else None
+            result = self.db.execute_query(query, (str(session_id),))
+            if result:
+                analytics = result[0]
+                # Convert UUID strings to UUID objects
+                analytics['session_id'] = UUID(analytics['session_id'])
+                if analytics['game_session_id']:
+                    analytics['game_session_id'] = UUID(analytics['game_session_id'])
+                return analytics
+            return None
+            
         except Exception as e:
             self.logger.error(f"Failed to get session analytics: {e}")
             raise
